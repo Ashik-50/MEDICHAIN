@@ -189,4 +189,3 @@ Check `.env` for correct backend URL.
 * Use `.env` only for the frontend
 * No extra configuration needed
 
----

@@ -190,9 +190,3 @@ Check `.env` for correct backend URL.
 * No extra configuration needed
 
 ---
-
-If you want, I can also add:
-
-* API documentation
-* Short GitHub description
-* Architecture diagram

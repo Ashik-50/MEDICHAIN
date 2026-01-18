@@ -189,10 +189,3 @@ Check `.env` for correct backend URL.
 * Use `.env` only for the frontend
 * No extra configuration needed
 
----
-
-If you want, I can also add:
-
-* API documentation
-* Short GitHub description
-* Architecture diagram

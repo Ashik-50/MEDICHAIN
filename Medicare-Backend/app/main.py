@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 from app.database.connection import Base, engine
-from app.routes import auth, doctor, patient, admin, record, access_control, blockchain
+from app.routes import auth, doctor, patient, hospital, record, access_control, blockchain
 from app.services.blockchain_service import verify_chain
 from app.database.connection import SessionLocal
 from app.utils.logger import logger
@@ -30,7 +30,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(doctor.router)
 app.include_router(patient.router)
-app.include_router(admin.router)
+app.include_router(hospital.router)
 app.include_router(record.router)
 app.include_router(access_control.router)
 app.include_router(blockchain.router)

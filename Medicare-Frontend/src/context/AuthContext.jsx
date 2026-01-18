@@ -32,24 +32,51 @@ export const AuthProvider = ({ children }) => {
   }, [user]);
 
   const login = async (email, password) => {
+  try {
+    console.log("LOGIN PAYLOAD", { email, password });
+    const res = await api.post("/auth/login", { email, password });
+
+    // 🚨 FIRST LOGIN (Hospital / Doctor / Patient created by hospital)
+    if (res.data.first_login) {
+      toast("First login detected. Please reset your password.", {
+        icon: "🔐",
+      });
+
+      navigate("/reset-password", {
+        state: { userId: res.data.user_id },
+      });
+
+      return; // ⛔ STOP HERE (NO TOKEN)
+    }
+
+    // ✅ NORMAL LOGIN (Token exists)
+    const token = res.data.access_token;
+
+    if (!token) {
+      throw new Error("Token missing from login response");
+    }
+
+    setToken(token);
+    localStorage.setItem("token", token);
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+
+    // ✅ Fetch profile
+    const profileRes = await api.get("/auth/me");
+    const userData = profileRes.data;
+    setUser(userData);
+    localStorage.setItem("id", userData.id);
+
+    // ✅ Fetch encrypted keys
     try {
-      const res = await api.post("/auth/login", { email, password });
-      const token = res.data.access_token;
-      setToken(token);
-      localStorage.setItem("token", token);
+      const keyRes = await api.get("/auth/get-keys");
 
-      const profileRes = await api.get("/auth/me", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const userData = profileRes.data;
-      setUser(userData);
-      localStorage.setItem("id", userData.id);
-
-      const keyRes = await api.get("/auth/get-keys", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const { public_key, private_key_encrypted, salt, nonce, kdf_iterations } = keyRes.data;
+      const {
+        public_key,
+        private_key_encrypted,
+        salt,
+        nonce,
+        kdf_iterations,
+      } = keyRes.data;
 
       const privateKeyPem = await decryptPrivateKeyUtil(
         password,
@@ -59,17 +86,22 @@ export const AuthProvider = ({ children }) => {
         kdf_iterations
       );
 
-      // ✅ store decrypted key for future use
       localStorage.setItem("privateKey", privateKeyPem.trim());
       localStorage.setItem("publicKey", public_key);
-
-      toast.success("Login successful");
-      navigate(`/${userData.role}/dashboard`);
-    } catch (error) {
-      console.error("Login failed", error);
-      toast.error("Invalid credentials or server error");
+    }catch (err) {
+        console.warn("Keys not initialized yet for this user");
     }
-  };
+
+    toast.success("Login successful");
+    navigate(`/${userData.role}/dashboard`);
+  } catch (error) {
+    console.error("Login failed", error);
+    toast.error(
+      error?.response?.data?.detail || "Invalid credentials or server error"
+    );
+  }
+};
+
 
   const register = async ({ name, email, password, role }) => {
     const payloadRole = String(role).toLowerCase();

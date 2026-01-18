@@ -14,11 +14,12 @@ import DoctorUploadPage from "../pages/Doctor/UploadRecord";
 import FindDoctor from "../pages/Patient/FindDoctor";
 import PatientLogs from "../pages/Patient/PatientLogs";
 import DoctorLogs from "../pages/Doctor/DoctorLogs";
-import AdminDashboard from "../pages/Admin/AdminDashboard";
-import ManagePatients from "../pages/Admin/ManagePatients";
-import ManageDoctors from "../pages/Admin/ManageDoctors";
-import BlockchainLedger from "../pages/Admin/Blockchain";
-import AuditLogs from "../pages/Admin/Audit";
+import HospitalDashboard from "../pages/Hospital/HospitalDashboard";
+import HospitalDoctors from "../pages/Hospital/HospitalDoctors";
+import HospitalUsers from "../pages/Hospital/HospitalUsers";
+import BlockchainLedger from "../pages/Hospital/Blockchain";
+import HospitalAudit from "../pages/Hospital/HospitalAudit";
+import ResetPassword from "../pages/Hospital/ResetPassword";
 
 function ProtectedRoute({ children, role }) {
   const { user } = useAuth();
@@ -121,45 +122,46 @@ export default function AppRouter() {
               }
             />
             <Route
-              path="/admin/dashboard"
+              path="/hospital/dashboard"
               element={
-                <ProtectedRoute role="admin">
-                  <AdminDashboard />
+                <ProtectedRoute role="hospital">
+                  <HospitalDashboard />
                 </ProtectedRoute>
               }
             />
           <Route
-            path="/admin/manage-patients"
+            path="/hospital/manage-patients"
             element={
-              <ProtectedRoute role="admin">
-                <ManagePatients />
+              <ProtectedRoute role="hospital">
+                <HospitalUsers />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/manage-doctors"
+            path="/hospital/manage-doctors"
             element={
-              <ProtectedRoute role="admin">
-                <ManageDoctors />
+              <ProtectedRoute role="hospital">
+                <HospitalDoctors />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/blockchain"
+            path="/hospital/blockchain"
             element={
-              <ProtectedRoute role="admin">
+              <ProtectedRoute role="hospital">
                 <BlockchainLedger />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/audit"
+            path="/hospital/audit"
             element={
-              <ProtectedRoute role="admin">
-                <AuditLogs />
+              <ProtectedRoute role="hospital">
+                <HospitalAudit />
               </ProtectedRoute>
             }
           />
+          <Route path="/reset-password" element={<ResetPassword />} />
           </Routes>
         </div>
       </KeyProvider>

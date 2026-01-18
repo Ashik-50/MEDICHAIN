@@ -118,7 +118,7 @@ def get_ledger(db: Session = Depends(get_db)):
 
     return {"blocks": ledger}
 
-@router.get("/verify", dependencies=[Depends(require_role(RoleEnum.admin))])
+@router.get("/verify", dependencies=[Depends(require_role(RoleEnum.hospital))])
 def verify_blockchain(db: Session = Depends(get_db)):
     blocks = db.query(Block).order_by(Block.id).all()
     previous_hash = "0"

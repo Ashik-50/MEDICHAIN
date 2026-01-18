@@ -94,12 +94,10 @@ export default function Login() {
             {loading ? "Signing in..." : "Sign In"}
           </PrimaryButton>
 
-          <p className="text-center text-gray-700 text-sm">
-            New here?{" "}
-            <Link to="/register" className="text-blue-700 hover:underline font-medium">
-              Create an account
-            </Link>
+          <p className="text-center text-gray-600 text-sm">
+            Contact your hospital administrator for access
           </p>
+
         </form>
       </motion.div>
     </section>

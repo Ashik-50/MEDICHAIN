@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, String, DateTime
+from sqlalchemy import Column, Integer, ForeignKey, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.connection import Base
@@ -12,6 +12,7 @@ class AccessLog(Base):
     record_id = Column(Integer, ForeignKey("records.id"), nullable=True)
     action = Column(String(100), nullable=False)  # e.g., "viewed record", "downloaded record"
     timestamp = Column(DateTime, default=datetime.utcnow)
+    is_emergency = Column(Boolean, default=False)
 
     patient = relationship("User", foreign_keys=[patient_id])
     doctor = relationship("User", foreign_keys=[doctor_id])

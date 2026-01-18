@@ -25,12 +25,12 @@ const navItems = {
     { label: "Access Control", icon: ShieldCheck, path: "/patient/access-control" },
     { label: "Logs", icon: FileText, path: "/patient/logs" },
   ],
-  admin: [
-    { label: "Dashboard", icon: LayoutDashboard, path: "/admin/dashboard" },
-    { label: "Patients", icon: Users, path: "/admin/manage-patients" },
-    { label: "Doctors", icon: Users, path: "/admin/manage-doctors" },
-    { label: "Blockchain", icon: Network, path: "/admin/blockchain" },
-    { label: "Audit", icon: FileText, path: "/admin/audit" },
+  hospital: [
+    { label: "Dashboard", icon: LayoutDashboard, path: "/hospital/dashboard" },
+    { label: "Patients", icon: Users, path: "/hospital/manage-patients" },
+    { label: "Doctors", icon: Users, path: "/hospital/manage-doctors" },
+    { label: "Blockchain", icon: Network, path: "/hospital/blockchain" },
+    { label: "Audit", icon: FileText, path: "/hospital/audit" },
   ],
 };
 

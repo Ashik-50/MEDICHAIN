@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Search, FileDown, User2 } from "lucide-react";
+import { Loader2, Search, FileDown, User2, AlertTriangle } from "lucide-react";
 import { toast } from "react-hot-toast";
 import DoctorLayout from "@/components/DoctorLayout";
 import { getActiveConnections } from "@/services/connectionService";
@@ -9,12 +9,17 @@ import { useAuth } from "@/context/AuthContext";
 
 export default function Patients() {
   const { user } = useAuth();
+
   const [activePatients, setActivePatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [records, setRecords] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
+
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const [selectedRecordId, setSelectedRecordId] = useState(null);
+  const [emergencyReason, setEmergencyReason] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,21 +58,27 @@ export default function Patients() {
     }
   };
 
-  const handleDownload = async (recordId, fileName) => {
+  const handleDownload = async (recordId) => {
     try {
       const token = localStorage.getItem("token");
       const privateKey = localStorage.getItem("privateKey");
       if (!privateKey) return toast.error("Private key missing. Please re-login.");
 
       toast.loading("Decrypting file...", { id: "decrypt" });
-      const response = await fetch(`http://127.0.0.1:8000/record/doctor/decrypt/${recordId}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ private_key_pem: privateKey.replace(/\\n/g, "\n") }),
-      });
+
+      const response = await fetch(
+        `http://127.0.0.1:8000/record/doctor/decrypt/${recordId}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            private_key_pem: privateKey.replace(/\\n/g, "\n"),
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errData = await response.json();
@@ -81,6 +92,48 @@ export default function Patients() {
       toast.success("File ready!", { id: "decrypt" });
     } catch (err) {
       toast.error(err.message || "Decryption failed", { id: "decrypt" });
+    }
+  };
+
+  // 🔥 Emergency submit
+  const handleEmergencySubmit = async () => {
+    try {
+      if (emergencyReason.trim().length < 15) {
+        return toast.error("Provide detailed emergency reason (min 15 chars)");
+      }
+
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        "http://127.0.0.1:8000/access/emergency-access",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            record_id: selectedRecordId,
+            reason: emergencyReason,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Emergency access failed");
+      }
+
+      toast.success("Emergency access granted");
+
+      setEmergencyOpen(false);
+      setEmergencyReason("");
+
+      // Optional auto-download after emergency
+      handleDownload(selectedRecordId);
+    } catch (err) {
+      toast.error(err.message);
     }
   };
 
@@ -99,136 +152,121 @@ export default function Patients() {
         className="relative min-h-screen px-8 py-10 overflow-y-auto"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-[#ECF7FF] via-[#F8FBFF] to-[#E5F1FF]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(56,189,248,0.15),transparent_60%),radial-gradient(circle_at_80%_80%,rgba(37,99,235,0.15),transparent_70%)] blur-3xl" />
+        <div className="relative z-10">
+          <h1 className="text-4xl font-extrabold mb-8">
+            My Patients
+          </h1>
 
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between mb-10">
-          <div>
-            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-700 via-cyan-600 to-sky-500 bg-clip-text text-transparent">
-              My Patients
-            </h1>
-            <p className="text-gray-600 mt-1 text-sm md:text-base">
-              Manage and access records of your connected patients securely.
-            </p>
-          </div>
-
-          <div className="relative mt-4 sm:mt-0 w-full sm:w-80">
-            <Search className="absolute left-3 top-3 text-gray-400" size={18} />
-            <input
-              type="text"
-              placeholder="Search patient..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-white/70 backdrop-blur-xl border border-gray-200 rounded-xl 
-                         pl-10 pr-4 py-2 text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-cyan-300"
-            />
-          </div>
-        </div>
-
-        <section className="relative z-10">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-5 flex items-center gap-2">
-            <User2 className="text-cyan-500" /> Active Patients
-          </h2>
-
-          {filterBySearch(activePatients).length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-              {filterBySearch(activePatients).map((p, index) => (
-                <motion.div
-                  key={p.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="rounded-3xl bg-white/80 backdrop-blur-2xl border border-white/60 
-                             shadow-[0_8px_30px_rgba(56,189,248,0.15)] hover:shadow-[0_8px_40px_rgba(56,189,248,0.25)] 
-                             transition-all duration-500 hover:-translate-y-1 p-6 flex flex-col justify-between"
-                >
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800 mb-1">{p.name}</h3>
-                    <p className="text-gray-500 text-sm mb-1">{p.email}</p>
-                    <p className="text-gray-400 text-sm italic line-clamp-2">{p.description}</p>
-                  </div>
-
-                  <button
-                    onClick={() => handleViewRecords(p)}
-                    className="mt-5 bg-gradient-to-r from-sky-500 to-cyan-500 text-white py-2 rounded-xl 
-                               hover:from-sky-600 hover:to-cyan-600 transition-all font-medium shadow-sm"
-                  >
-                    <FileDown size={16} className="inline mr-2" />
-                    View Records
-                  </button>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500 italic text-sm">No active patients yet.</p>
-          )}
-        </section>
-
-        {/* 📁 Record Modal */}
-        {/* 📁 Record Modal */}
-<AnimatePresence>
-  {modalOpen && selectedPatient && (
-    <motion.div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50 p-4"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <motion.div
-        className="bg-white/95 backdrop-blur-2xl border border-white/60 rounded-3xl 
-                   p-8 w-full max-w-3xl shadow-[0_0_40px_rgba(56,189,248,0.3)]"
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-      >
-        <h2 className="text-2xl font-bold text-gray-800 mb-5">
-          {selectedPatient.name}'s Records
-        </h2>
-
-        <div className="max-h-[500px] overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-cyan-300 scrollbar-track-transparent">
-          {records.length > 0 ? (
-            records.map((r) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filterBySearch(activePatients).map((p) => (
               <div
-                key={r.id}
-                className="flex justify-between items-center p-4 rounded-xl bg-gradient-to-r from-[#F7FBFF] to-[#EBF5FF] 
-                           border border-white/60 hover:border-cyan-300/60 hover:bg-gradient-to-r hover:from-[#E8F4FF] hover:to-[#DFF0FF] 
-                           transition-all"
+                key={p.id}
+                className="rounded-3xl bg-white shadow-lg p-6"
               >
-                <p className="text-gray-800 font-medium truncate max-w-[70%] text-[15px]">
-                  {r.file_name}
-                </p>
+                <h3 className="text-xl font-bold">{p.name}</h3>
+                <p className="text-sm text-gray-500">{p.email}</p>
+
                 <button
-                  onClick={() => handleDownload(r.id, r.file_name)}
-                  className="bg-gradient-to-r from-sky-400 to-cyan-400 hover:from-sky-500 hover:to-cyan-500
-                             text-white text-sm font-medium py-1.5 px-4 rounded-lg transition-all duration-300
-                             active:scale-[0.98]"
+                  onClick={() => handleViewRecords(p)}
+                  className="mt-5 bg-cyan-500 text-white py-2 rounded-xl w-full"
                 >
-                  <FileDown size={14} className="inline mr-1 mb-[1px]" />
-                  Download
+                  View Records
                 </button>
               </div>
-            ))
-          ) : (
-            <p className="text-gray-500 italic text-center">No records found.</p>
+            ))}
+          </div>
+        </div>
+
+        {/* 📁 Record Modal */}
+        <AnimatePresence>
+          {modalOpen && selectedPatient && (
+            <motion.div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 p-4">
+              <div className="bg-white p-8 rounded-2xl w-full max-w-3xl">
+                <h2 className="text-2xl font-bold mb-5">
+                  {selectedPatient.name}'s Records
+                </h2>
+
+                <div className="space-y-3">
+                  {records.map((r) => (
+                    <div
+                      key={r.id}
+                      className="flex justify-between items-center p-4 rounded-xl bg-gray-50"
+                    >
+                      <p className="truncate">{r.file_name}</p>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDownload(r.id)}
+                          className="bg-cyan-500 text-white px-4 py-1 rounded-lg"
+                        >
+                          Download
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedRecordId(r.id);
+                            setEmergencyOpen(true);
+                          }}
+                          className="bg-red-500 text-white px-4 py-1 rounded-lg flex items-center gap-1"
+                        >
+                          <AlertTriangle size={14} />
+                          Emergency
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={() => setModalOpen(false)}
+                    className="bg-gray-300 px-6 py-2 rounded-lg"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           )}
-        </div>
+        </AnimatePresence>
 
-        <div className="flex justify-end mt-6">
-          <button
-            onClick={() => setModalOpen(false)}
-            className="bg-gradient-to-r from-sky-400 to-cyan-400 hover:from-sky-500 hover:to-cyan-500 
-                       text-white font-medium py-2 px-8 rounded-xl transition-all duration-300 active:scale-[0.98]"
-          >
-            Close
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  )}
-</AnimatePresence>
+        {/* 🚨 Emergency Modal */}
+        <AnimatePresence>
+          {emergencyOpen && (
+            <motion.div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 p-4">
+              <div className="bg-white p-6 rounded-xl w-full max-w-md">
+                <h3 className="text-lg font-semibold text-red-600 mb-3">
+                  Emergency Access Reason
+                </h3>
 
+                <textarea
+                  value={emergencyReason}
+                  onChange={(e) => setEmergencyReason(e.target.value)}
+                  className="w-full border rounded-lg p-2"
+                  rows={4}
+                  placeholder="Provide detailed emergency reason..."
+                />
+
+                <div className="flex justify-end gap-3 mt-4">
+                  <button
+                    onClick={() => setEmergencyOpen(false)}
+                    className="px-4 py-2 border rounded-lg"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={handleEmergencySubmit}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                  >
+                    Confirm Emergency
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </DoctorLayout>
   );

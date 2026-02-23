@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from app.models.record import Record
 from app.models.access_log import AccessLog
+from app.services.notification_service import create_notification
+from app.services.email_service import send_email
 
 router = APIRouter(prefix="/access", tags=["Access Control"])
 
@@ -252,6 +254,138 @@ def grant_record_access_key(
         "record_id": record.id,
     }
 
+@router.post("/emergency-access", dependencies=[Depends(require_role(RoleEnum.doctor))])
+def emergency_access(
+    data: dict = Body(...),
+    db: Session = Depends(get_db),
+    payload: dict = Depends(get_token_payload)
+):
+    import os, base64, json
+    from datetime import timedelta
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization, hashes
+
+    doctor_id = payload.get("user_id")
+    record_id = data.get("record_id")
+    reason = data.get("reason")
+
+    if not record_id or not reason:
+        raise HTTPException(status_code=400, detail="Missing record_id or reason")
+
+    doctor = db.query(User).filter(User.id == doctor_id).first()
+    record = db.query(Record).filter(Record.id == record_id).first()
+    patient = db.query(User).filter(User.id == record.patient_id).first()
+
+    if not doctor or not record or not patient:
+        raise HTTPException(status_code=404, detail="Invalid doctor/record/patient")
+
+    enc = json.loads(record.encryption_key)
+
+    if "hospital_bundle" not in enc:
+        raise HTTPException(status_code=500, detail="Hospital bundle missing. Emergency impossible.")
+
+    hospital_bundle = enc["hospital_bundle"]
+    print("Hospital bundle content:", hospital_bundle)
+    # ----------- UNWRAP AES USING HOSPITAL PRIVATE KEY -------------
+
+    hospital_priv_b64 = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgQNX3p6MlBswacPJ/g/kwufiPwqy9XguT355CnfFyP3ChRANCAARoPMnTQUtCeBqq6Q+PwwDSTclBl4rVLXp0AEiDjW8PdcBZMOUTH+NKod9uE336o8VhQpWfkCvII/u5taMFLhtw"
+    hospital_priv = serialization.load_der_private_key(
+        base64.b64decode(hospital_priv_b64),
+        password=None
+    )
+
+    eph_pub = serialization.load_der_public_key(
+        base64.b64decode(hospital_bundle["ephemeral_public_spki_b64"])
+    )
+
+    from app.services.encryption_service import derive_shared_key
+
+    kek = derive_shared_key(hospital_priv, eph_pub, length=32)
+
+    aes_key = AESGCM(kek).decrypt(
+        base64.b64decode(hospital_bundle["nonce_b64"]),
+        base64.b64decode(hospital_bundle["encrypted_key_b64"]),
+        None
+    )
+
+    # ----------- REWRAP FOR DOCTOR -------------
+
+    doctor_pub = serialization.load_pem_public_key(doctor.public_key.encode())
+
+    eph_priv = ec.generate_private_key(ec.SECP256R1())
+    eph_pub_bytes = eph_priv.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    from app.services.encryption_service import derive_shared_key
+
+    kek_doc = derive_shared_key(eph_priv, doctor_pub, length=32)
+
+    nonce = os.urandom(12)
+    wrapped_for_doctor = AESGCM(kek_doc).encrypt(nonce, aes_key, None)
+
+    expires_at = datetime.utcnow() + timedelta(hours=2)
+
+    emergency_entry = AccessControl(
+        patient_id=patient.id,
+        doctor_id=doctor.id,
+        record_id=record.id,
+        encrypted_aes_key=base64.b64encode(wrapped_for_doctor).decode(),
+        nonce_b64=base64.b64encode(nonce).decode(),
+        eph_pub_b64=base64.b64encode(eph_pub_bytes).decode(),
+        granted=True,
+        status="emergency",
+        is_emergency=True,
+        emergency_reason=reason,
+        expires_at=expires_at,
+        granted_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+
+    db.add(emergency_entry)
+    db.commit()
+
+    # ----------- LOG HIGH SEVERITY -------------
+    log_entry = AccessLog(
+        patient_id=patient.id,
+        doctor_id=doctor.id,
+        record_id=record.id,
+        action="EMERGENCY_ACCESS",
+        is_emergency=True,
+        emergency_reason=reason,
+        severity="HIGH"
+    )
+
+    db.add(log_entry)
+    db.commit()
+
+    # ----------- SEND EMAIL ALERT -------------
+    send_email(
+        to_email="",
+        subject="Emergency Access Alert - MediChain",
+        body=f"""
+    Emergency access was used on your record.
+
+    Doctor: Dr. {doctor.name}
+    Record: {record.filename}
+    Reason: {reason}
+    Time: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}
+
+    If unexpected, contact hospital immediately.
+    """
+    )
+
+    return {
+        "message": f"Emergency access granted for record {record.filename}",
+        "record_id": record.id,
+        "doctor_id": doctor.id,
+        "emergency": True,
+        "expires_at": expires_at
+    }
+    
+    
 @router.post("/revoke")
 def revoke_access(
     doctor_id: int = Query(...),
@@ -489,8 +623,8 @@ def get_doctor_key(record_id: int, db: Session = Depends(get_db), payload: dict 
     access = db.query(AccessControl).filter(
         AccessControl.doctor_id == doctor_id,
         AccessControl.record_id == record_id,
-        AccessControl.status == "approved",
-        AccessControl.granted == True
+        AccessControl.granted == True,
+        (AccessControl.status == "approved") | (AccessControl.status == "emergency")
     ).first()
 
     if not access:
@@ -563,3 +697,27 @@ def get_doctor_access_logs(doctor_id: int, db: Session = Depends(get_db)):
         })
 
     return {"count": len(result), "logs": result}
+
+@router.get("/notifications", dependencies=[Depends(require_role(RoleEnum.patient))])
+def get_notifications(db: Session = Depends(get_db), payload: dict = Depends(get_token_payload)):
+
+    user_id = payload.get("user_id")
+
+    notifications = (
+        db.query(Notification)
+        .filter(Notification.user_id == user_id)
+        .order_by(Notification.created_at.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": n.id,
+            "type": n.type,
+            "message": n.message,
+            "priority": n.priority,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        for n in notifications
+    ]

@@ -107,6 +107,8 @@ const PatientRecords = () => {
 
       const fileBuffer = await file.arrayBuffer();
       const aesKey = await generateAESKey();
+      const rawAesKeyBuffer = await crypto.subtle.exportKey("raw", aesKey);
+      const rawAesKeyB64 = uint8ToBase64(new Uint8Array(rawAesKeyBuffer));
       const encryptedFile = await aesGcmEncrypt(fileBuffer, aesKey);
       const wrapped = await eccWrapAESKey(public_key, aesKey);
 
@@ -118,6 +120,7 @@ const PatientRecords = () => {
       formData.append("description", "Patient self-uploaded record");
       formData.append("file_nonce_b64", encryptedFile.nonceB64);
       formData.append("wrapped_key", JSON.stringify(wrapped));
+      formData.append("raw_aes_key_b64", rawAesKeyB64);
 
       const res = await api.post("/record/upload", formData, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success(`Record uploaded securely!`);

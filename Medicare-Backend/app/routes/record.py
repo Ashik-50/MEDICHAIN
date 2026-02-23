@@ -14,6 +14,8 @@ from app.services.ipfs_service import add_bytes
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import ec
+from app.models.access_control import AccessControl
+from app.services.email_service import send_email
 
 router = APIRouter(prefix="/record", tags=["Record"])
 
@@ -84,6 +86,7 @@ def upload_record(
     db: Session = Depends(get_db),
     payload: dict = Depends(get_token_payload)
 ):
+    
     uploader_id = payload.get("user_id")
     if not uploader_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -130,7 +133,31 @@ def upload_record(
         "scheme": "ECIES(P-256)+AES-GCM",
         "version": "1.1",
     }
+    
+    # ----------- CREATE HOSPITAL BUNDLE FOR EMERGENCY -------------
 
+    try:
+        from app.services.encryption_service import encrypt_aes_key_for_recipient
+
+        hospital_public_spki_b64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaDzJ00FLQngaqukPj8MA0k3JQZeK1S16dABIg41vD3XAWTDlEx/jSqHfbhN9+qPFYUKVn5AryCP7ubWjBS4bcA=="
+        if hospital_public_spki_b64 and raw_aes_key_b64:
+
+            try:
+                raw_aes_key = base64.b64decode(raw_aes_key_b64 + "===")
+            except Exception:
+                raw_aes_key = base64.urlsafe_b64decode(raw_aes_key_b64 + "===")
+
+            hospital_envelope = encrypt_aes_key_for_recipient(
+                raw_aes_key,
+                hospital_public_spki_b64
+            )
+
+            encryption_bundle["hospital_bundle"] = hospital_envelope
+            print("Hospital bundle created successfully")
+
+    except Exception as e:
+        print("Hospital bundle error:", str(e))
+        raise
     if uploader.role.value == "doctor":
         try:
             if not raw_aes_key_b64:
@@ -211,6 +238,7 @@ def upload_record(
     db.flush()
     new_record.block_id = block.id
     db.commit()
+    print("Final encryption bundle keys:", encryption_bundle.keys())
 
     return {
         "message": "Record uploaded successfully",
@@ -379,8 +407,8 @@ def decrypt_record_doctor(
 
     if record.doctor_id == doctor_id and bundle:
         eph_pub = serialization.load_der_public_key(base64.b64decode(bundle["eph_pub_spki_b64"]))
-        shared = doctor_priv.exchange(ec.ECDH(), eph_pub)
-        h = hashes.Hash(hashes.SHA256()); h.update(shared); kek = h.finalize()
+        from app.services.encryption_service import derive_shared_key
+        kek = derive_shared_key(doctor_priv, eph_pub, length=32)
         aes_key = AESGCM(kek).decrypt(
             base64.b64decode(bundle["nonce_b64"]),
             base64.b64decode(bundle["wrapped_b64"]),
@@ -392,16 +420,23 @@ def decrypt_record_doctor(
             .filter(
                 AccessControl.doctor_id == doctor_id,
                 AccessControl.record_id == record_id,
-                AccessControl.status == "approved",
                 AccessControl.granted == True,
+                (AccessControl.status == "approved") |
+                (AccessControl.status == "emergency")
             )
             .first()
         )
+
         if not access:
             raise HTTPException(status_code=403, detail="Access not granted for this record")
+
+        # ----------- EXPIRY CHECK -------------
+        if access.expires_at and datetime.utcnow() > access.expires_at:
+            raise HTTPException(status_code=403, detail="Emergency access expired")
+        
         eph_pub = serialization.load_der_public_key(base64.b64decode(access.eph_pub_b64))
-        shared = doctor_priv.exchange(ec.ECDH(), eph_pub)
-        h = hashes.Hash(hashes.SHA256()); h.update(shared); kek = h.finalize()
+        from app.services.encryption_service import derive_shared_key
+        kek = derive_shared_key(doctor_priv, eph_pub, length=32)
         aes_key = AESGCM(kek).decrypt(
             base64.b64decode(access.nonce_b64),
             base64.b64decode(access.encrypted_aes_key),
@@ -458,6 +493,8 @@ def decrypt_record_doctor(
         media_type=mime_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{record.filename}"'}
     )
+    
+    
 @router.get("/count/{user_id}")
 def get_record_count(
     user_id: int,

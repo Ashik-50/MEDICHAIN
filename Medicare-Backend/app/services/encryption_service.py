@@ -86,6 +86,7 @@ def encrypt_aes_key_for_recipient(aes_key_bytes: bytes, recipient_public_spki_b6
         "nonce_b64": base64.b64encode(nonce).decode()
     }
 
+
 def decrypt_aes_key_from_sender(ephemeral_public_spki_b64: str, encrypted_key_b64: str, nonce_b64: str, recipient_private_pkcs8_b64: str) -> bytes:
     """
     Recipient provides their private key (PKCS8 DER base64) to decrypt the AES key envelope.
